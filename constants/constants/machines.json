@@ -1,0 +1,40 @@
+[
+  {
+    "title": "Machines Guidées (Matrix)",
+    "data": [
+      { "id": "1", "name": "Chest Press", "target": "Pectoraux", "brand": "Matrix", "exercises": ["Prise Neutre", "Prise Large"] },
+      { "id": "2", "name": "Pec Deck", "target": "Pectoraux", "brand": "Matrix", "exercises": ["Pectoraux (Écarté)", "Deltoïde Arrière"] },
+      { "id": "3", "name": "Shoulder Press", "target": "Épaules", "brand": "Matrix", "exercises": ["Développé Militaire"] },
+      { "id": "4", "name": "Lateral Raise", "target": "Épaules", "brand": "Matrix", "exercises": ["Élévations Latérales"] },
+      { "id": "5", "name": "Lat Pulldown", "target": "Dos", "brand": "Matrix", "exercises": ["Tirage Poitrine", "Tirage Nuque", "Prise Serrée"] },
+      { "id": "6", "name": "Seated Row", "target": "Dos", "brand": "Matrix", "exercises": ["Tirage Horizontal", "Tirage Unilatéral"] },
+      { "id": "7", "name": "Back Extension", "target": "Dos", "brand": "Matrix", "exercises": ["Lombaires"] },
+      { "id": "8", "name": "Triceps Press", "target": "Triceps", "brand": "Matrix", "exercises": ["Dips assis"] },
+      { "id": "9", "name": "Biceps Curl", "target": "Biceps", "brand": "Matrix", "exercises": ["Curl Machine"] },
+      { "id": "10", "name": "Leg Press", "target": "Jambes", "brand": "Matrix", "exercises": ["Presse à cuisses", "Mollets à la presse"] },
+      { "id": "11", "name": "Leg Extension", "target": "Jambes", "brand": "Matrix", "exercises": ["Quadriceps"] },
+      { "id": "12", "name": "Seated Leg Curl", "target": "Jambes", "brand": "Matrix", "exercises": ["Ischios-jambiers"] },
+      { "id": "13", "name": "Abdominal Crunch", "target": "Abdominaux", "brand": "Matrix", "exercises": ["Crunch Machine"] },
+      { "id": "14", "name": "Adducteur / Abducteur", "target": "Fessiers", "brand": "Matrix", "exercises": ["Adducteurs (Intérieur)", "Abducteurs (Extérieur)"] },
+      { "id": "15", "name": "Glute Kickback", "target": "Fessiers", "brand": "Matrix", "exercises": ["Fessiers Arrière"] }
+    ]
+  },
+  {
+    "title": "Poids Libres & Câbles",
+    "data": [
+      { "id": "16", "name": "Poulie Vis-à-vis", "target": "Polyarticulaire", "brand": "Matrix", "exercises": ["Écartés hauts", "Écartés bas", "Triceps Corde", "Biceps Corde", "Tirage visage"] },
+      { "id": "17", "name": "Smith Machine", "target": "Polyarticulaire", "brand": "Matrix", "exercises": ["Squat guidé", "Développé couché guidé", "Développé militaire"] },
+      { "id": "18", "name": "Haltères", "target": "Libre", "brand": "Libre", "exercises": ["Développé couché", "Curl incliné", "Élévations latérales", "Rowing haltère"] },
+      { "id": "19", "name": "Barre Olympique", "target": "Libre", "brand": "Libre", "exercises": ["Squat", "Soulevé de terre", "Développé couché", "Rowing barre"] }
+    ]
+  },
+  {
+    "title": "Espace Cardio",
+    "data": [
+      { "id": "20", "name": "Tapis de Course", "target": "Cardio", "brand": "Matrix", "exercises": ["Marche inclinée", "Course à pied", "Fractionné"] },
+      { "id": "21", "name": "Vélo Elliptique", "target": "Cardio", "brand": "Matrix", "exercises": ["Endurance", "Résistance"] },
+      { "id": "22", "name": "Stairmaster", "target": "Cardio", "brand": "Matrix", "exercises": ["Montée d'escalier"] },
+      { "id": "23", "name": "Rameur", "target": "Cardio", "brand": "Matrix", "exercises": ["Rameur intensif"] }
+    ]
+  }
+]

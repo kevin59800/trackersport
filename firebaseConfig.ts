@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getFirestore, Firestore, initializeFirestore } from "firebase/firestore";
-import { getAnalytics, Analytics } from "firebase/analytics"; // Ajout Analytics
+import { getAnalytics, Analytics } from "firebase/analytics";
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from "react-native";
 import {
@@ -10,14 +10,14 @@ import {
   getReactNativePersistence,
 } from 'firebase/auth';
 
-// Ta configuration Firebase
+// Utilisation des variables d'environnement (process.env)
 const firebaseConfig = {
-  apiKey: "AIzaSyAWMb7LbrDD3gBD3inJ2UxvRUZmKgIwLWg",
-  authDomain: "sporttracker-391b5.firebaseapp.com",
-  projectId: "sporttracker-391b5",
-  storageBucket: "sporttracker-391b5.firebasestorage.app",
-  messagingSenderId: "984360239000",
-  appId: "1:984360239000:web:c0a6dc2cbb7180f1b135ed",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
 // 1. Initialisation de l'App (Singleton)
@@ -25,7 +25,6 @@ const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) 
 
 // 2. Initialisation de l'Auth intelligente
 let auth: Auth;
-
 if (Platform.OS === 'web') {
   auth = getAuth(app);
 } else {

@@ -10,14 +10,14 @@ import {
   getReactNativePersistence,
 } from 'firebase/auth';
 
-// REMPLACE LES VALEURS CI-DESSOUS PAR CELLES DE TON FICHIER .env.local
+// Configuration avec tes clés réelles (Fallback inclus pour Vercel)
 const firebaseConfig = {
-  apiKey: "TON_API_KEY_ICI",
-  authDomain: "TON_PROJECT_ID.firebaseapp.com",
-  projectId: "TON_PROJECT_ID",
-  storageBucket: "TON_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "TON_SENDER_ID",
-  appId: "TON_APP_ID"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyAWMb7LbrDD3gBD3inJ2UxvRUZmKgIwLWg",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "sporttracker-391b5.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "sporttracker-391b5",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "sporttracker-391b5.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "984360239000",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:984360239000:web:c0a6dc2cbb7180f1b135ed",
 };
 
 // 1. Initialisation de l'App
@@ -38,12 +38,15 @@ const db: Firestore = Platform.OS === 'web'
     ? initializeFirestore(app, { experimentalForceLongPolling: true })
     : getFirestore(app);
 
-// 4. Initialisation de Analytics
+// 4. Initialisation de Google Analytics (Sécurisé pour le Web)
 let analytics: Analytics | null = null;
 if (Platform.OS === 'web' && typeof window !== "undefined") {
     isSupported().then(supported => {
-        if (supported) analytics = getAnalytics(app);
-    });
+        if (supported) {
+            analytics = getAnalytics(app);
+            console.log("✅ Firebase Analytics est prêt");
+        }
+    }).catch(err => console.log("Analytics non supporté"));
 }
 
 export { auth, db, analytics, app };

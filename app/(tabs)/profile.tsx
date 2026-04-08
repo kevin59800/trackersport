@@ -17,7 +17,11 @@ import {
   FlatList
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
-import { auth, db } from "../../firebaseConfig";
+
+// Modification des imports pour inclure analytics et logEvent
+import { auth, db, analytics } from "../../firebaseConfig";
+import { logEvent } from "firebase/analytics";
+
 import {
   doc,
   getDoc,
@@ -113,17 +117,14 @@ export default function ProfileScreen() {
   const [customDate, setCustomDate] = useState("");
   const [weeklySchedule, setWeeklySchedule] = useState<any>({"Lun": [], "Mar": [], "Mer": [], "Jeu": [], "Ven": [], "Sam": [], "Dim": []});
 
-  // --- LOGIQUE SÉLECTION JOUR ACTUEL ---
-  // On récupère l'index (0-6, Dimanche=0) et on convertit pour matcher DAYS_FULL
   const getTodayFull = () => {
-    const dayIndex = new Date().getDay(); // 0 = Dim, 1 = Lun...
-    const mapIndexToFull = [6, 0, 1, 2, 3, 4, 5]; // Repositionne pour ["Lun", ..., "Dim"]
+    const dayIndex = new Date().getDay();
+    const mapIndexToFull = [6, 0, 1, 2, 3, 4, 5];
     return DAYS_FULL[mapIndexToFull[dayIndex]];
   };
 
-  // --- ÉTATS PLANNING ---
   const [planningModalVisible, setPlanningModalVisible] = useState(false);
-  const [selectedDay, setSelectedDay] = useState(getTodayFull()); // Initialisé sur aujourd'hui
+  const [selectedDay, setSelectedDay] = useState(getTodayFull());
   const [tempSelectedExercise, setTempSelectedExercise] = useState("Choisir un exercice...");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
@@ -133,6 +134,15 @@ export default function ProfileScreen() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // --- TRACKING ANALYTICS : PAGE VIEW ---
+        if (analytics) {
+          logEvent(analytics, 'screen_view', {
+            screen_name: 'Profile',
+            user_id: user.uid
+          });
+          console.log("Analytics: Page Profil tracée !");
+        }
+
         const userSnap = await getDoc(doc(db, "users", user.uid));
         if (userSnap.exists()) setUserData(userSnap.data());
         const planSnap = await getDoc(doc(db, "users", user.uid, "config", "planning"));
@@ -201,6 +211,16 @@ export default function ProfileScreen() {
       await addDoc(collection(db, "users", user.uid, "history"), {
         exerciseName: selectedExData.name, weight: Number(weight), reps: Number(reps), sets: Number(sets), date: customDate, timestamp: Timestamp.fromDate(dateObject)
       });
+
+      // --- TRACKING ANALYTICS : ACTION D'ENTRAINEMENT ---
+      if (analytics) {
+        logEvent(analytics, 'add_workout_log', {
+          exercise_name: selectedExData.name,
+          weight: Number(weight),
+          reps: Number(reps)
+        });
+      }
+
       setLogModalVisible(false);
       setWeight(""); setReps(""); setSets("");
       Alert.alert("Succès", "Données enregistrées !");
@@ -276,13 +296,12 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* MODAL PLANNING AVEC DROPDOWN ACCORDEON */}
+      {/* MODAL PLANNING */}
       <Modal visible={planningModalVisible} transparent animationType="slide">
         <View style={styles.overlay}>
           <View style={[styles.logBox, { height: '85%', width: '95%', paddingHorizontal: 15 }]}>
             <Text style={styles.logTitle}>ORGANISER MA SEMAINE</Text>
 
-            {/* CALENDRIER HORIZONTAL */}
             <View style={styles.calendarStrip}>
               {DAYS_FULL.map(day => (
                 <TouchableOpacity key={day} onPress={() => setSelectedDay(day)} style={[styles.dayCircle, selectedDay === day && styles.dayCircleActive]}>
@@ -291,10 +310,8 @@ export default function ProfileScreen() {
               ))}
             </View>
 
-            {/* LE DROPDOWN (VOLET ROULANT) */}
             <View style={styles.dropdownContainer}>
               <Text style={styles.pickerLabel}>AJOUTER À MON PROGRAMME</Text>
-
               <View style={styles.pickerRow}>
                 <View style={{flex: 1}}>
                     <TouchableOpacity style={styles.dropdownHeader} onPress={togglePicker}>
@@ -303,7 +320,6 @@ export default function ProfileScreen() {
                         </Text>
                         <Text style={{color: '#FF6600', fontSize: 12, fontWeight: 'bold'}}>{isPickerOpen ? "▲" : "▼"}</Text>
                     </TouchableOpacity>
-
                     {isPickerOpen && (
                         <View style={styles.dropdownList}>
                             <FlatList
@@ -312,10 +328,7 @@ export default function ProfileScreen() {
                                 nestedScrollEnabled={true}
                                 style={{ maxHeight: 200 }}
                                 renderItem={({ item }) => (
-                                    <TouchableOpacity
-                                        onPress={() => selectExercise(item)}
-                                        style={styles.dropdownItem}
-                                    >
+                                    <TouchableOpacity onPress={() => selectExercise(item)} style={styles.dropdownItem}>
                                         <Text style={styles.dropdownItemText}>{item}</Text>
                                     </TouchableOpacity>
                                 )}
@@ -323,7 +336,6 @@ export default function ProfileScreen() {
                         </View>
                     )}
                 </View>
-
                 {!isPickerOpen && (
                     <TouchableOpacity onPress={addExerciseToDay} style={styles.plusBtn}>
                         <Text style={styles.plusBtnText}>+</Text>
@@ -332,7 +344,6 @@ export default function ProfileScreen() {
               </View>
             </View>
 
-            {/* PROGRAMME DU JOUR */}
             <View style={{flex: 1, width: '100%', marginTop: 10}}>
                 <Text style={styles.listHeader}>SÉANCE DU {selectedDay.toUpperCase()}</Text>
                 <ScrollView style={{ flex: 1 }}>
@@ -422,62 +433,27 @@ const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.98)', justifyContent: 'center', alignItems: 'center' },
   logBox: { backgroundColor: '#1A1A1A', width: '85%', borderRadius: 25, padding: 25, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
   logTitle: { color: '#FF6600', fontWeight: 'bold', fontSize: 18, marginBottom: 20 },
-
   calendarStrip: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 25 },
   dayCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#222', justifyContent: 'center', alignItems: 'center' },
   dayCircleActive: { backgroundColor: '#FF6600' },
   dayText: { color: '#666', fontSize: 12, fontWeight: 'bold' },
   dayTextActive: { color: '#000' },
-
   dropdownContainer: { width: '100%', marginBottom: 10, zIndex: 100 },
   pickerLabel: { color: '#666', fontSize: 10, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', letterSpacing: 1 },
   pickerRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  dropdownHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#222',
-    padding: 15,
-    borderRadius: 12,
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#333'
-  },
+  dropdownHeader: { flexDirection: 'row', backgroundColor: '#222', padding: 15, borderRadius: 12, justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#333' },
   dropdownHeaderText: { color: '#444', fontSize: 14 },
-  dropdownList: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    marginTop: 5,
-    borderWidth: 1,
-    borderColor: '#FF6600',
-    overflow: 'hidden',
-    position: 'absolute',
-    top: 50,
-    left: 0,
-    right: 0,
-    zIndex: 999,
-    elevation: 5
-  },
+  dropdownList: { backgroundColor: '#1A1A1A', borderRadius: 12, marginTop: 5, borderWidth: 1, borderColor: '#FF6600', overflow: 'hidden', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 999, elevation: 5 },
   dropdownItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#222' },
   dropdownItemText: { color: '#FFF', fontSize: 14 },
-
   plusBtn: { backgroundColor: '#FF6600', width: 50, height: 50, borderRadius: 12, marginLeft: 10, justifyContent: 'center', alignItems: 'center' },
   plusBtnText: { color: '#000', fontSize: 30, fontWeight: 'bold' },
-
   listHeader: { color: '#FF6600', fontSize: 12, fontWeight: 'bold', marginBottom: 15, letterSpacing: 1 },
-  plannedRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#222',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 8
-  },
+  plannedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#222', padding: 15, borderRadius: 12, marginBottom: 8 },
   plannedText: { color: '#FFF', fontSize: 14, fontWeight: '500' },
   deleteBtn: { backgroundColor: 'rgba(255, 68, 68, 0.1)', padding: 8, borderRadius: 6 },
   emptyContainer: { alignItems: 'center', marginTop: 40 },
   emptyText: { color: '#444', fontSize: 13, fontStyle: 'italic' },
-
   dateInputWrapper: { width: '100%', marginBottom: 20, alignItems: 'center' },
   dateInput: { backgroundColor: '#222', width: '60%', height: 40, borderRadius: 10, color: '#FFF', textAlign: 'center', fontSize: 14, borderWidth: 1, borderColor: '#333' },
   inputGroup: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 },

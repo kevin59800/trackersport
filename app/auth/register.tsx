@@ -1,131 +1,122 @@
-import { router } from "expo-router";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import React, { useState } from "react";
-import {
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  ActivityIndicator
-} from "react-native";
-import { auth } from "../../firebaseConfig";
+import React, { useEffect } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Alert } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { auth } from '../../firebaseConfig';
+import { router } from 'expo-router';
+
+// Indispensable pour fermer la fenêtre après connexion (surtout sur le Web)
+WebBrowser.maybeCompleteAuthSession();
 
 export default function RegisterScreen() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false); // Ajout d'un état de chargement
+  // Configuration des IDs Clients Google
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    // ID du "Client Web 2" (pour Vercel et Localhost)
+    webClientId: '984360239000-ku04n5o8ao4r4j6ma4liqt5utvh45j2o.apps.googleusercontent.com',
 
-  const handleSignUp = () => {
-    if (email === "" || password === "") {
-      Alert.alert("Erreur", "Veuillez remplir tous les champs.");
-      return;
-    }
+    // ID du "SportTracker Expo Proxy" (pour Expo Go sur iOS)
+    iosClientId: '984360239000-doss9eb1eqe5ke5vdqgv90aiie2ikmgr.apps.googleusercontent.com',
 
-    setLoading(true);
+    // ID du "SportTracker Expo Proxy" (pour Expo Go sur Android)
+    androidClientId: '984360239000-doss9eb1eqe5ke5vdqgv90aiie2ikmgr.apps.googleusercontent.com',
+  });
 
-    createUserWithEmailAndPassword(auth, email, password)
-      .then((userCredential) => {
-        const user = userCredential.user;
-        console.log("Utilisateur créé :", user.email);
+  // Écouteur de réponse Google
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      const credential = GoogleAuthProvider.credential(id_token);
 
-        // ✅ On passe l'email à la page suivante via les paramètres de recherche (query params)
-        router.replace({
-          pathname: "/auth/setup-profile",
-          params: { userEmail: user.email }
+      signInWithCredential(auth, credential)
+        .then(() => {
+          console.log("Connexion Google réussie !");
+          // Redirection vers l'onglet principal (tabs)
+          router.replace('/(tabs)');
+        })
+        .catch((error) => {
+          console.error("Erreur Firebase :", error);
+          Alert.alert("Erreur de connexion", error.message);
         });
-      })
-      .catch((error) => {
-        setLoading(false);
-        console.error("Erreur Firebase :", error.code);
-        let message = "Une erreur est survenue.";
-        if (error.code === 'auth/email-already-in-use') message = "Cet email est déjà utilisé.";
-        if (error.code === 'auth/weak-password') message = "Le mot de passe est trop court.";
-        Alert.alert("Erreur", message);
-      });
-  };
+    }
+  }, [response]);
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-        <Text style={styles.backText}>← Retour</Text>
+      <Text style={styles.title}>SportTracker</Text>
+      <Text style={styles.subtitle}>Créez votre compte pour commencer</Text>
+
+      {/* Bouton Google */}
+      <TouchableOpacity
+        style={[styles.googleButton, !request && { opacity: 0.6 }]}
+        disabled={!request}
+        onPress={() => {
+          promptAsync();
+        }}
+      >
+        <Text style={styles.buttonText}>Continuer avec Google</Text>
       </TouchableOpacity>
 
-      <Text style={styles.title}>Inscription</Text>
-      <Text style={styles.subtitle}>Rejoignez la communauté SportTracker</Text>
-
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          placeholderTextColor="#999"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Mot de passe (min. 6 caractères)"
-          placeholderTextColor="#999"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-      </View>
-
+      {/* Lien vers la connexion classique */}
       <TouchableOpacity
-        style={[styles.button, loading && { opacity: 0.7 }]}
-        onPress={handleSignUp}
-        disabled={loading}
+        style={styles.linkContainer}
+        onPress={() => router.push('/auth/login')}
       >
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.buttonText}>CRÉER MON COMPTE</Text>
-        )}
+        <Text style={styles.linkText}>Déjà un compte ? <Text style={styles.linkHighlight}>Se connecter</Text></Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-// ... Tes styles restent identiques ...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#121212",
-    padding: 30,
-    justifyContent: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000', // Fond noir profond
+    padding: 24,
   },
-  backButton: { position: "absolute", top: 60, left: 20 },
-  backText: { color: "#FF6600", fontSize: 16 },
   title: {
     fontSize: 32,
-    fontWeight: "bold",
-    color: "#FF6600",
-    marginBottom: 10,
+    color: '#fff',
+    fontWeight: 'bold',
+    marginBottom: 8,
   },
-  subtitle: { color: "#fff", marginBottom: 30, opacity: 0.7 },
-  inputContainer: { width: "100%", marginBottom: 20 },
-  input: {
-    width: "100%",
-    height: 55,
-    backgroundColor: "#1E1E1E",
-    borderRadius: 12,
+  subtitle: {
+    fontSize: 16,
+    color: '#aaa',
+    marginBottom: 40,
+    textAlign: 'center',
+  },
+  googleButton: {
+    backgroundColor: '#fff',
+    paddingVertical: 16,
     paddingHorizontal: 20,
-    color: "#FFFFFF",
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  button: {
-    width: "100%",
-    height: 55,
-    backgroundColor: "#FF6600",
     borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#fff',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  buttonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "bold" },
+  buttonText: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  linkContainer: {
+    marginTop: 24,
+  },
+  linkText: {
+    color: '#888',
+    fontSize: 14,
+  },
+  linkHighlight: {
+    color: '#fff',
+    fontWeight: '600',
+  }
 });

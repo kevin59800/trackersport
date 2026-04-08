@@ -17,11 +17,8 @@ import {
   FlatList
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
-
-// Modification des imports pour inclure analytics et logEvent
 import { auth, db, analytics } from "../../firebaseConfig";
 import { logEvent } from "firebase/analytics";
-
 import {
   doc,
   getDoc,
@@ -134,19 +131,18 @@ export default function ProfileScreen() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // --- TRACKING ANALYTICS : PAGE VIEW ---
         if (analytics) {
-          logEvent(analytics, 'screen_view', {
-            screen_name: 'Profile',
-            user_id: user.uid
-          });
-          console.log("Analytics: Page Profil tracée !");
+          logEvent(analytics, 'screen_view', { screen_name: 'Profile', user_id: user.uid });
         }
 
         const userSnap = await getDoc(doc(db, "users", user.uid));
-        if (userSnap.exists()) setUserData(userSnap.data());
+        if (userSnap.exists()) {
+            setUserData(userSnap.data());
+        }
+
         const planSnap = await getDoc(doc(db, "users", user.uid, "config", "planning"));
         if (planSnap.exists()) setWeeklySchedule(planSnap.data().schedule);
+
         setLoading(false);
       }
     });
@@ -212,7 +208,6 @@ export default function ProfileScreen() {
         exerciseName: selectedExData.name, weight: Number(weight), reps: Number(reps), sets: Number(sets), date: customDate, timestamp: Timestamp.fromDate(dateObject)
       });
 
-      // --- TRACKING ANALYTICS : ACTION D'ENTRAINEMENT ---
       if (analytics) {
         logEvent(analytics, 'add_workout_log', {
           exercise_name: selectedExData.name,
@@ -254,8 +249,19 @@ export default function ProfileScreen() {
         <View style={styles.header}>
             <View style={styles.headerContent}>
                 <View style={styles.userInfoRow}>
-                    <View style={styles.avatar}><Text style={styles.avatarText}>{userData?.firstName?.charAt(0)}</Text></View>
-                    <View style={styles.infoContainer}><Text style={styles.userName}>{userData?.firstName} {userData?.lastName}</Text><Text style={styles.userStats}>{userData?.weight}kg</Text></View>
+                    <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>
+                            {userData?.firstName ? userData.firstName.charAt(0).toUpperCase() : "?"}
+                        </Text>
+                    </View>
+                    <View style={styles.infoContainer}>
+                        <Text style={styles.userName}>
+                            {userData?.firstName} {userData?.lastName}
+                        </Text>
+                        <Text style={styles.userStats}>
+                            {userData?.weight}kg • {userData?.height}cm • {userData?.age} ans
+                        </Text>
+                    </View>
                 </View>
                 <View style={{flexDirection: 'row'}}>
                   <TouchableOpacity onPress={() => setPlanningModalVisible(true)} style={[styles.blackLogoutBtn, {marginRight: 10, backgroundColor: '#FF6600'}]}><Text style={[styles.blackLogoutBtnText, {color: '#000'}]}>PLANNING</Text></TouchableOpacity>
@@ -296,7 +302,7 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* MODAL PLANNING */}
+      {/* ... (Modals Planning et Log restent identiques à ton fichier) ... */}
       <Modal visible={planningModalVisible} transparent animationType="slide">
         <View style={styles.overlay}>
           <View style={[styles.logBox, { height: '85%', width: '95%', paddingHorizontal: 15 }]}>
@@ -369,7 +375,6 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* MODAL LOG */}
       <Modal visible={logModalVisible} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.logBox}>
@@ -389,6 +394,7 @@ export default function ProfileScreen() {
   );
 }
 
+// Les styles restent identiques à ton code original...
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' },

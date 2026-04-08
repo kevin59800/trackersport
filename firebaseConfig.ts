@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getFirestore, Firestore, initializeFirestore } from "firebase/firestore";
+import { getAnalytics, Analytics } from "firebase/analytics"; // Ajout Analytics
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from "react-native";
 import {
@@ -7,7 +8,6 @@ import {
   getAuth,
   Auth,
   getReactNativePersistence,
-  browserLocalPersistence
 } from 'firebase/auth';
 
 // Ta configuration Firebase
@@ -27,21 +27,22 @@ const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) 
 let auth: Auth;
 
 if (Platform.OS === 'web') {
-  // Configuration spécifique pour Vercel / Navigateur
   auth = getAuth(app);
-  // Sur le Web, Firebase gère la persistence automatiquement
-  // ou via browserLocalPersistence si nécessaire.
 } else {
-  // Configuration spécifique pour iOS / Android (Expo Go)
   auth = initializeAuth(app, {
     persistence: getReactNativePersistence(ReactNativeAsyncStorage),
   });
 }
 
-// 3. Initialisation de Firestore avec le "Long Polling" pour le Web
-// Cela évite les erreurs de connexion persistantes sur certains navigateurs
+// 3. Initialisation de Firestore
 const db: Firestore = Platform.OS === 'web'
     ? initializeFirestore(app, { experimentalForceLongPolling: true })
     : getFirestore(app);
 
-export { auth, db };
+// 4. Initialisation de Google Analytics (uniquement sur le Web)
+let analytics: Analytics | null = null;
+if (Platform.OS === 'web' && typeof window !== "undefined") {
+    analytics = getAnalytics(app);
+}
+
+export { auth, db, analytics };

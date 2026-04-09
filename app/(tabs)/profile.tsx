@@ -17,20 +17,20 @@ import {
   FlatList
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
-import { auth, db, analytics } from "../../firebaseConfig";
-import { logEvent } from "firebase/analytics";
+import { auth, db } from "../../firebaseConfig";
 import {
   doc,
   getDoc,
   setDoc,
   collection,
   query,
-  where,
   getDocs,
   addDoc,
   Timestamp,
   serverTimestamp,
-  orderBy // AJOUTÉ : Pour le tri
+  orderBy,
+  where,
+  limit
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import workoutData from '../../constants/constants/workoutData';
@@ -44,7 +44,73 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// --- Composant Historique ---
+// --- COMPOSANT : Suivi du Poids (Graphique) ---
+const WeightHistory = ({ userData, refreshTrigger }: { userData: any, refreshTrigger: number }) => {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchWeight = async () => {
+      const user = auth.currentUser;
+      if (!user || !userData) return;
+
+      try {
+        const q = query(
+          collection(db, "users", user.uid, "weightHistory"),
+          orderBy("timestamp", "asc")
+        );
+        const snap = await getDocs(q);
+        const historyWeights = snap.docs.map(doc => doc.data());
+
+        // On affiche les 7 derniers points de l'historique réel en base
+        setData(historyWeights.slice(-7));
+      } catch (e) {
+        console.error("Erreur graphique poids:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchWeight();
+  }, [refreshTrigger, userData]);
+
+  if (loading) return <ActivityIndicator color="#FF6600" style={{ marginVertical: 20 }} />;
+
+  if (data.length < 2) return (
+    <View style={styles.emptyWeightCard}>
+      <Text style={styles.emptyWeightText}>Ajoute une pesée pour voir ton évolution par rapport au départ !</Text>
+    </View>
+  );
+
+  const chartData = {
+    labels: data.map(d => d.date === "Départ" ? "Dép." : d.date?.split('/')[0] + '/' + d.date?.split('/')[1]),
+    datasets: [{
+      data: data.map(d => Number(d.weight)),
+      color: (opacity = 1) => `rgba(255, 102, 0, ${opacity})`,
+      strokeWidth: 3
+    }]
+  };
+
+  return (
+    <LineChart
+      data={chartData}
+      width={screenWidth - 40}
+      height={180}
+      chartConfig={{
+        backgroundColor: "#1A1A1A",
+        backgroundGradientFrom: "#1A1A1A",
+        backgroundGradientTo: "#1A1A1A",
+        decimalPlaces: 1,
+        color: (opacity = 1) => `rgba(255, 102, 0, ${opacity})`,
+        labelColor: (opacity = 1) => `rgba(150, 150, 150, ${opacity})`,
+        propsForDots: { r: "5", strokeWidth: "2", stroke: "#FF6600" }
+      }}
+      bezier
+      style={{ borderRadius: 15, marginVertical: 10 }}
+    />
+  );
+};
+
+// --- Composant Historique Exercice ---
 const ExerciseHistory = ({ name }: { name: string }) => {
   const [historyEntries, setHistoryEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +120,6 @@ const ExerciseHistory = ({ name }: { name: string }) => {
       const user = auth.currentUser;
       if (!user) return;
       try {
-        // CORRECTION : Tri direct par timestamp via Firebase
         const q = query(
           collection(db, "users", user.uid, "history"),
           where("exerciseName", "==", name),
@@ -62,14 +127,8 @@ const ExerciseHistory = ({ name }: { name: string }) => {
         );
         const querySnapshot = await getDocs(q);
         let data = querySnapshot.docs.map(doc => doc.data());
-
-        // Le tri est maintenant géré par la requête Firestore
         setHistoryEntries(data.slice(-6));
-      } catch (e) {
-        console.error("Erreur historique:", e);
-      } finally {
-        setLoading(false);
-      }
+      } catch (e) { console.error("Erreur historique:", e); } finally { setLoading(false); }
     };
     fetchHistory();
   }, [name]);
@@ -81,7 +140,7 @@ const ExerciseHistory = ({ name }: { name: string }) => {
     labels: historyEntries.map(item => item.date?.split('/')[0] + '/' + item.date?.split('/')[1] || ""),
     datasets: [{
         data: historyEntries.map(item => Number(item.weight) || 0),
-        color: (opacity = 1) => `rgba(255, 102, 0, ${opacity})`,
+        color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
         strokeWidth: 3
     }]
   };
@@ -137,7 +196,10 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(null);
 
-  // États Modales
+  const [weightModalVisible, setWeightModalVisible] = useState(false);
+  const [newWeight, setNewWeight] = useState("");
+  const [weightRefresh, setWeightRefresh] = useState(0);
+
   const [logModalVisible, setLogModalVisible] = useState(false);
   const [selectedExData, setSelectedExData] = useState<any>(null);
   const [weight, setWeight] = useState("");
@@ -162,10 +224,6 @@ export default function ProfileScreen() {
           if (planSnap.exists()) {
             setWeeklySchedule(planSnap.data().schedule);
           }
-
-          if (analytics) {
-            logEvent(analytics, 'screen_view', { screen_name: 'Profile', user_id: user.uid });
-          }
         } catch (error) {
           console.error("Erreur chargement profil:", error);
         } finally {
@@ -177,6 +235,51 @@ export default function ProfileScreen() {
     });
     return () => unsubscribe();
   }, []);
+
+  const handleAddWeight = async () => {
+    if (!newWeight) return;
+    const user = auth.currentUser;
+    if (!user || !userData) return;
+
+    try {
+      const now = new Date();
+      const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      const weightNum = parseFloat(newWeight.replace(',', '.'));
+      const historyRef = collection(db, "users", user.uid, "weightHistory");
+
+      // Vérifier si c'est la toute première pesée pour sauvegarder le poids de départ
+      const q = query(historyRef, limit(1));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        await addDoc(historyRef, {
+          weight: parseFloat(userData.weight),
+          timestamp: userData.createdAt || serverTimestamp(),
+          date: "Départ"
+        });
+      }
+
+      // 1. Ajouter la nouvelle pesée à l'historique
+      await addDoc(historyRef, {
+        weight: weightNum,
+        timestamp: serverTimestamp(),
+        date: dateStr
+      });
+
+      // 2. Mettre à jour le document utilisateur (pour le header)
+      await setDoc(doc(db, "users", user.uid), { weight: newWeight }, { merge: true });
+
+      // 3. Mise à jour locale
+      setUserData((prev: any) => ({ ...prev, weight: newWeight }));
+      setWeightRefresh(prev => prev + 1);
+
+      setWeightModalVisible(false);
+      setNewWeight("");
+      Alert.alert("Succès", "Poids mis à jour !");
+    } catch (e) {
+      Alert.alert("Erreur", "Impossible d'enregistrer le poids.");
+    }
+  };
 
   const getTodayFull = () => {
     const dayIndex = new Date().getDay();
@@ -243,14 +346,12 @@ export default function ProfileScreen() {
     if (!weight || !reps || !sets || !customDate) {
         return Alert.alert("Erreur", "Merci de remplir tous les champs.");
     }
-
     const user = auth.currentUser;
     if (!user) return;
 
     try {
       const parts = customDate.split('/');
       const dateObject = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]), 12, 0, 0);
-
       const historyCollection = collection(db, "users", user.uid, "history");
 
       await addDoc(historyCollection, {
@@ -268,7 +369,7 @@ export default function ProfileScreen() {
       Alert.alert("Succès", "Données enregistrées !");
     } catch (e: any) {
       console.error("Erreur Firebase:", e);
-      Alert.alert("Erreur", "Impossible d'enregistrer les données.");
+      Alert.alert("Erreur", "Impossible d'enregistrer.");
     }
   };
 
@@ -296,6 +397,7 @@ export default function ProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: "#121212" }}>
       <ScrollView ref={scrollRef} style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* HEADER */}
         <View style={styles.header}>
             <View style={styles.headerContent}>
                 <View style={styles.userInfoRow}>
@@ -320,6 +422,18 @@ export default function ProfileScreen() {
             </View>
         </View>
 
+        {/* SECTION POIDS */}
+        <View style={styles.weightSection}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <Text style={styles.sectionLabel}>ÉVOLUTION DU POIDS</Text>
+            <TouchableOpacity style={styles.addWeightBtn} onPress={() => setWeightModalVisible(true)}>
+              <Text style={styles.addWeightBtnText}>+ PESÉE</Text>
+            </TouchableOpacity>
+          </View>
+          <WeightHistory userData={userData} refreshTrigger={weightRefresh} />
+        </View>
+
+        {/* AUJOURD'HUI */}
         <View style={styles.todaySection}>
           <Text style={styles.sectionLabel}>AUJOURD'HUI • {todayName.toUpperCase()}</Text>
           {weeklySchedule[todayName]?.length > 0 ? (
@@ -334,6 +448,7 @@ export default function ProfileScreen() {
           ) : <View style={styles.restCard}><Text style={styles.restText}>REPOS 😴</Text></View>}
         </View>
 
+        {/* EXERCICES */}
         <View style={styles.body}>
           {workoutData.map((section: any, idx: number) => (
             <View key={idx} style={styles.sectionWrapper}>
@@ -352,6 +467,30 @@ export default function ProfileScreen() {
           ))}
         </View>
       </ScrollView>
+
+      {/* MODALE PESÉE */}
+      <Modal visible={weightModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={styles.logBox}>
+            <Text style={styles.logTitle}>NOUVELLE PESÉE</Text>
+            <TextInput
+              style={[styles.input, {width: '60%', marginBottom: 20}]}
+              placeholder="Poids (kg)"
+              placeholderTextColor="#444"
+              keyboardType="numeric"
+              value={newWeight}
+              onChangeText={setNewWeight}
+              autoFocus
+            />
+            <TouchableOpacity style={styles.confirmBtn} onPress={handleAddWeight}>
+                <Text style={styles.confirmBtnText}>ENREGISTRER</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setWeightModalVisible(false)}>
+                <Text style={{color: '#666', marginTop: 15}}>ANNULER</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal Planning */}
       <Modal visible={planningModalVisible} transparent animationType="slide">
@@ -421,7 +560,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* Modal Enregistrement Log */}
+      {/* Modal Enregistrement Log Exercice */}
       <Modal visible={logModalVisible} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.logBox}>
@@ -475,6 +614,13 @@ const styles = StyleSheet.create({
   userStats: { color: '#666', fontSize: 12 },
   blackLogoutBtn: { backgroundColor: '#333', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   blackLogoutBtnText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+
+  weightSection: { paddingHorizontal: 20, marginTop: 20 },
+  addWeightBtn: { backgroundColor: 'rgba(255, 102, 0, 0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, borderWidth: 1, borderColor: '#FF6600' },
+  addWeightBtnText: { color: '#FF6600', fontSize: 10, fontWeight: 'bold' },
+  emptyWeightCard: { backgroundColor: '#1e1e1e', padding: 20, borderRadius: 15, alignItems: 'center', marginTop: 10 },
+  emptyWeightText: { color: '#666', fontSize: 12, textAlign: 'center' },
+
   todaySection: { paddingHorizontal: 20, marginBottom: 20, marginTop: 20 },
   sectionLabel: { color: '#666', fontSize: 11, fontWeight: 'bold', marginBottom: 10, letterSpacing: 1 },
   todayCard: { backgroundColor: '#1E1E1E', borderRadius: 15, padding: 10 },

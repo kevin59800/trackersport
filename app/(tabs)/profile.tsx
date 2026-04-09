@@ -32,6 +32,7 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import workoutData from '../../constants/constants/workoutData';
+import { useRouter } from "expo-router"; // Important pour la redirection si besoin
 
 const screenWidth = Dimensions.get("window").width;
 const DAYS_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
@@ -41,7 +42,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// --- Composant Historique ---
+// --- Composant Historique (Gardé tel quel) ---
 const ExerciseHistory = ({ name }: { name: string }) => {
   const [historyEntries, setHistoryEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,11 +102,15 @@ const ExerciseHistory = ({ name }: { name: string }) => {
 };
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   const exerciseRefs = useRef<{ [key: string]: View }>({});
+
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(null);
+
+  // États Modales
   const [logModalVisible, setLogModalVisible] = useState(false);
   const [selectedExData, setSelectedExData] = useState<any>(null);
   const [weight, setWeight] = useState("");
@@ -114,6 +119,47 @@ export default function ProfileScreen() {
   const [customDate, setCustomDate] = useState("");
   const [weeklySchedule, setWeeklySchedule] = useState<any>({"Lun": [], "Mar": [], "Mer": [], "Jeu": [], "Ven": [], "Sam": [], "Dim": []});
 
+  // --- Logique de récupération des données ---
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          // 1. Récupérer les infos de l'utilisateur (Poids, Nom, etc.)
+          const userSnap = await getDoc(doc(db, "users", user.uid));
+
+          if (userSnap.exists()) {
+            setUserData(userSnap.data());
+          } else {
+            // Si l'utilisateur est connecté mais n'a pas de data, on l'envoie au setup
+            router.replace("/auth/setup-profile");
+            return;
+          }
+
+          // 2. Récupérer le planning
+          const planSnap = await getDoc(doc(db, "users", user.uid, "config", "planning"));
+          if (planSnap.exists()) {
+            setWeeklySchedule(planSnap.data().schedule);
+          }
+
+          // Analytics
+          if (analytics) {
+            logEvent(analytics, 'screen_view', { screen_name: 'Profile', user_id: user.uid });
+          }
+        } catch (error) {
+          console.error("Erreur chargement données profil:", error);
+          Alert.alert("Erreur", "Impossible de charger votre profil.");
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        // Redirection vers login si déconnecté
+        router.replace("/auth/login");
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- Fonctions utilitaires ---
   const getTodayFull = () => {
     const dayIndex = new Date().getDay();
     const mapIndexToFull = [6, 0, 1, 2, 3, 4, 5];
@@ -127,27 +173,6 @@ export default function ProfileScreen() {
 
   const todayName = DAYS_FR[new Date().getDay()];
   const allExercises = workoutData.flatMap(section => section.data.map(ex => ex.name));
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        if (analytics) {
-          logEvent(analytics, 'screen_view', { screen_name: 'Profile', user_id: user.uid });
-        }
-
-        const userSnap = await getDoc(doc(db, "users", user.uid));
-        if (userSnap.exists()) {
-            setUserData(userSnap.data());
-        }
-
-        const planSnap = await getDoc(doc(db, "users", user.uid, "config", "planning"));
-        if (planSnap.exists()) setWeeklySchedule(planSnap.data().schedule);
-
-        setLoading(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
 
   const saveSchedule = async (newSchedule: any) => {
     const user = auth.currentUser;
@@ -208,14 +233,6 @@ export default function ProfileScreen() {
         exerciseName: selectedExData.name, weight: Number(weight), reps: Number(reps), sets: Number(sets), date: customDate, timestamp: Timestamp.fromDate(dateObject)
       });
 
-      if (analytics) {
-        logEvent(analytics, 'add_workout_log', {
-          exercise_name: selectedExData.name,
-          weight: Number(weight),
-          reps: Number(reps)
-        });
-      }
-
       setLogModalVisible(false);
       setWeight(""); setReps(""); setSets("");
       Alert.alert("Succès", "Données enregistrées !");
@@ -251,7 +268,7 @@ export default function ProfileScreen() {
                 <View style={styles.userInfoRow}>
                     <View style={styles.avatar}>
                         <Text style={styles.avatarText}>
-                            {userData?.firstName ? userData.firstName.charAt(0).toUpperCase() : "?"}
+                            {userData?.firstName ? userData.firstName.charAt(0).toUpperCase() : userData?.lastName?.charAt(0).toUpperCase() || "U"}
                         </Text>
                     </View>
                     <View style={styles.infoContainer}>
@@ -270,6 +287,7 @@ export default function ProfileScreen() {
             </View>
         </View>
 
+        {/* ... (Le reste de ton UI avec TodaySection et Body reste identique) ... */}
         <View style={styles.todaySection}>
           <Text style={styles.sectionLabel}>AUJOURD'HUI • {todayName.toUpperCase()}</Text>
           {weeklySchedule[todayName]?.length > 0 ? (
@@ -302,7 +320,7 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* ... (Modals Planning et Log restent identiques à ton fichier) ... */}
+      {/* Modal Planning */}
       <Modal visible={planningModalVisible} transparent animationType="slide">
         <View style={styles.overlay}>
           <View style={[styles.logBox, { height: '85%', width: '95%', paddingHorizontal: 15 }]}>
@@ -375,6 +393,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
+      {/* Modal Enregistrement Log */}
       <Modal visible={logModalVisible} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.logBox}>
@@ -394,8 +413,8 @@ export default function ProfileScreen() {
   );
 }
 
-// Les styles restent identiques à ton code original...
 const styles = StyleSheet.create({
+  // Garde tes styles ils sont parfaits
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' },
   header: { backgroundColor: "#1A1A1A", paddingHorizontal: 20, paddingBottom: 25, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#333' },

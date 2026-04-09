@@ -22,11 +22,12 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../firebaseConfig';
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -55,15 +56,37 @@ export default function LoginScreen() {
       const userCredential = await signInWithCredential(auth, credential);
       const user = userCredential.user;
 
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (!userDoc.exists()) {
-        await setDoc(doc(db, "users", user.uid), {
-          uid: user.uid, email: user.email, createdAt: serverTimestamp(), profileCompleted: false
-        });
-      }
+      // On vérifie l'existence du document dans Firestore
+      const userDocRef = doc(db, "users", user.uid);
+      const userDocSnap = await getDoc(userDocRef);
 
-      router.replace(userDoc.exists() && userDoc.data()?.profileCompleted ? '/(tabs)/profile' : '/auth/setup-profile');
+      if (!userDocSnap.exists()) {
+        // CAS : Nouveau compte -> Création et redirection vers SETUP
+        await setDoc(userDocRef, {
+          uid: user.uid,
+          email: user.email,
+          createdAt: serverTimestamp(),
+          profileCompleted: false
+        });
+
+        // On passe les infos Google au setup pour pré-remplir
+        router.replace({
+            pathname: '/auth/setup-profile',
+            params: { name: user.displayName, photo: user.photoURL, userEmail: user.email }
+        });
+      } else {
+        // CAS : Le compte existe déjà
+        const userData = userDocSnap.data();
+        if (userData?.profileCompleted) {
+          // Profil fini -> Direction l'application
+          router.replace('/');
+        } else {
+          // Profil non fini -> Retour au setup
+          router.replace('/auth/setup-profile');
+        }
+      }
     } catch (error) {
+      console.error(error);
       Alert.alert("Erreur", "Connexion Google échouée.");
     } finally {
       setLoading(false);
@@ -72,23 +95,17 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) return Alert.alert("Erreur", "Remplissez tous les champs.");
-
-    // Nettoyage de l'email (espaces et majuscules)
     const cleanEmail = email.trim().toLowerCase();
 
     setLoading(true);
     try {
-      const res = await signInWithEmailAndPassword(auth, cleanEmail, password);
-      const userDoc = await getDoc(doc(db, "users", res.user.uid));
-      router.replace(userDoc.exists() && userDoc.data()?.profileCompleted ? '/(tabs)/profile' : '/auth/setup-profile');
+      await signInWithEmailAndPassword(auth, cleanEmail, password);
+      // On redirige vers l'index qui va checker le profil (plus sécurisé)
+      router.replace('/');
     } catch (error: any) {
-      console.log("Erreur de connexion:", error.code);
-
-      // Gestion des messages d'erreur selon le code Firebase
       let message = "Identifiants invalides.";
       if (error.code === 'auth/invalid-credential') message = "Email ou mot de passe incorrect.";
-      if (error.code === 'auth/too-many-requests') message = "Compte bloqué temporairement suite à trop d'essais. Réessayez plus tard.";
-
+      if (error.code === 'auth/too-many-requests') message = "Compte bloqué. Réessayez plus tard.";
       Alert.alert("Erreur", message);
     } finally {
       setLoading(false);
@@ -97,20 +114,15 @@ export default function LoginScreen() {
 
   const handleSendResetEmail = async () => {
     const cleanResetEmail = resetEmail.trim().toLowerCase();
-
-    if (!cleanResetEmail) {
-      return Alert.alert("Erreur", "Veuillez entrer votre email.");
-    }
-
+    if (!cleanResetEmail) return Alert.alert("Erreur", "Veuillez entrer votre email.");
     setResetLoading(true);
     try {
       await sendPasswordResetEmail(auth, cleanResetEmail);
       setResetModalVisible(false);
       setResetEmail('');
-      Alert.alert("Succès", "Un lien de réinitialisation a été envoyé à votre adresse email.");
+      Alert.alert("Succès", "Lien de récupération envoyé !");
     } catch (error: any) {
-      console.error(error.code);
-      Alert.alert("Erreur", "Impossible d'envoyer l'email. Vérifiez l'adresse.");
+      Alert.alert("Erreur", "Impossible d'envoyer l'email.");
     } finally {
       setResetLoading(false);
     }
@@ -146,11 +158,7 @@ export default function LoginScreen() {
             secureTextEntry
           />
 
-          <TouchableOpacity
-            onPress={() => setResetModalVisible(true)}
-            style={styles.forgotPasswordContainer}
-            hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}
-          >
+          <TouchableOpacity onPress={() => setResetModalVisible(true)} style={styles.forgotPasswordContainer}>
             <Text style={styles.forgotPasswordText}>MOT DE PASSE OUBLIÉ ?</Text>
           </TouchableOpacity>
 
@@ -174,16 +182,11 @@ export default function LoginScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      <Modal visible={resetModalVisible} transparent animationType="fade" onRequestClose={() => setResetModalVisible(false)}>
+      <Modal visible={resetModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={styles.modalContainer}
-          >
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>RÉINITIALISATION</Text>
-              <Text style={styles.modalSubtitle}>Entrez l'email associé à votre compte :</Text>
-
               <TextInput
                 style={styles.modalInput}
                 placeholder="votre@email.com"
@@ -192,22 +195,11 @@ export default function LoginScreen() {
                 onChangeText={setResetEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
-                autoFocus={Platform.OS !== 'web'}
               />
-
-              <TouchableOpacity
-                style={styles.modalConfirmBtn}
-                onPress={handleSendResetEmail}
-                disabled={resetLoading}
-              >
-                {resetLoading ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.modalConfirmText}>ENVOYER LE LIEN</Text>
-                )}
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleSendResetEmail} disabled={resetLoading}>
+                {resetLoading ? <ActivityIndicator color="#000" /> : <Text style={styles.modalConfirmText}>ENVOYER LE LIEN</Text>}
               </TouchableOpacity>
-
-              <TouchableOpacity onPress={() => { setResetModalVisible(false); setResetEmail(''); }}>
+              <TouchableOpacity onPress={() => {setResetModalVisible(false); setResetEmail('');}}>
                 <Text style={styles.modalCancelText}>ANNULER</Text>
               </TouchableOpacity>
             </View>
@@ -219,33 +211,31 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#121212', padding: 30, justifyContent: 'center' },
-  header: { marginBottom: 40 },
-  title: { fontSize: 36, color: '#FFF', fontWeight: 'bold', letterSpacing: -1 },
-  subtitle: { color: '#666', fontSize: 16, marginTop: 5 },
-  form: { width: '100%' },
-  label: { color: '#FF6600', fontSize: 10, fontWeight: 'bold', marginBottom: 8, letterSpacing: 1 },
-  input: { backgroundColor: '#1A1A1A', borderRadius: 12, padding: 16, color: '#FFF', marginBottom: 15, borderWidth: 1, borderColor: '#333', fontSize: 16 },
-  forgotPasswordContainer: { alignSelf: 'flex-end', marginBottom: 25 },
-  forgotPasswordText: { color: '#FF6600', fontSize: 11, fontWeight: 'bold' },
-  loginButton: { backgroundColor: '#FFF', padding: 18, borderRadius: 15, alignItems: 'center', marginTop: 10 },
-  loginButtonText: { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  dividerContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 30 },
-  divider: { flex: 1, height: 1, backgroundColor: '#333' },
-  dividerText: { color: '#444', paddingHorizontal: 15, fontSize: 12, fontWeight: 'bold' },
-  googleButton: { width: '100%', padding: 18, borderRadius: 15, borderWidth: 1, borderColor: '#333', alignItems: 'center', backgroundColor: 'transparent' },
-  googleButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
-  footerLink: { marginTop: 30, alignItems: 'center' },
-  footerText: { color: '#666', fontSize: 14 },
-  footerHighlight: { color: '#FF6600', fontWeight: 'bold' },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { width: '100%', alignItems: 'center' },
-  modalBox: { backgroundColor: '#1A1A1A', width: '85%', borderRadius: 25, padding: 25, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
-  modalTitle: { color: '#FF6600', fontWeight: 'bold', fontSize: 18, marginBottom: 10 },
-  modalSubtitle: { color: '#666', fontSize: 13, marginBottom: 20, textAlign: 'center' },
-  modalInput: { backgroundColor: '#121212', width: '100%', borderRadius: 12, padding: 15, color: '#FFF', borderWidth: 1, borderColor: '#333', marginBottom: 20 },
-  modalConfirmBtn: { backgroundColor: '#FF6600', width: '100%', padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 15 },
-  modalConfirmText: { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  modalCancelText: { color: '#666', fontSize: 13, fontWeight: 'bold' }
+    container: { flexGrow: 1, backgroundColor: '#121212', padding: 30, justifyContent: 'center' },
+    header: { marginBottom: 40 },
+    title: { fontSize: 36, color: '#FFF', fontWeight: 'bold', letterSpacing: -1 },
+    subtitle: { color: '#666', fontSize: 16, marginTop: 5 },
+    form: { width: '100%' },
+    label: { color: '#FF6600', fontSize: 10, fontWeight: 'bold', marginBottom: 8, letterSpacing: 1 },
+    input: { backgroundColor: '#1A1A1A', borderRadius: 12, padding: 16, color: '#FFF', marginBottom: 15, borderWidth: 1, borderColor: '#333', fontSize: 16 },
+    forgotPasswordContainer: { alignSelf: 'flex-end', marginBottom: 25 },
+    forgotPasswordText: { color: '#FF6600', fontSize: 11, fontWeight: 'bold' },
+    loginButton: { backgroundColor: '#FFF', padding: 18, borderRadius: 15, alignItems: 'center', marginTop: 10 },
+    loginButtonText: { color: '#000', fontWeight: 'bold', fontSize: 14 },
+    dividerContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 30 },
+    divider: { flex: 1, height: 1, backgroundColor: '#333' },
+    dividerText: { color: '#444', paddingHorizontal: 15, fontSize: 12, fontWeight: 'bold' },
+    googleButton: { width: '100%', padding: 18, borderRadius: 15, borderWidth: 1, borderColor: '#333', alignItems: 'center', backgroundColor: 'transparent' },
+    googleButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+    footerLink: { marginTop: 30, alignItems: 'center' },
+    footerText: { color: '#666', fontSize: 14 },
+    footerHighlight: { color: '#FF6600', fontWeight: 'bold' },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
+    modalContainer: { width: '100%', alignItems: 'center' },
+    modalBox: { backgroundColor: '#1A1A1A', width: '85%', borderRadius: 25, padding: 25, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
+    modalTitle: { color: '#FF6600', fontWeight: 'bold', fontSize: 18, marginBottom: 10 },
+    modalInput: { backgroundColor: '#121212', width: '100%', borderRadius: 12, padding: 15, color: '#FFF', borderWidth: 1, borderColor: '#333', marginBottom: 20 },
+    modalConfirmBtn: { backgroundColor: '#FF6600', width: '100%', padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 15 },
+    modalConfirmText: { color: '#000', fontWeight: 'bold', fontSize: 14 },
+    modalCancelText: { color: '#666', fontSize: 13, fontWeight: 'bold' }
 });

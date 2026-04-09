@@ -17,22 +17,24 @@ import {
   FlatList
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
-import { auth, db, analytics } from "../../firebaseConfig";
-import { logEvent } from "firebase/analytics";
+import { auth, db } from "../../firebaseConfig";
 import {
   doc,
   getDoc,
   setDoc,
   collection,
   query,
-  where,
   getDocs,
   addDoc,
-  Timestamp
+  Timestamp,
+  serverTimestamp,
+  orderBy,
+  where,
+  limit
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import workoutData from '../../constants/constants/workoutData';
-import { useRouter } from "expo-router"; // Important pour la redirection si besoin
+import { useRouter } from "expo-router";
 
 const screenWidth = Dimensions.get("window").width;
 const DAYS_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
@@ -42,7 +44,73 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// --- Composant Historique (Gardé tel quel) ---
+// --- COMPOSANT : Suivi du Poids (Graphique) ---
+const WeightHistory = ({ userData, refreshTrigger }: { userData: any, refreshTrigger: number }) => {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchWeight = async () => {
+      const user = auth.currentUser;
+      if (!user || !userData) return;
+
+      try {
+        const q = query(
+          collection(db, "users", user.uid, "weightHistory"),
+          orderBy("timestamp", "asc")
+        );
+        const snap = await getDocs(q);
+        const historyWeights = snap.docs.map(doc => doc.data());
+
+        // On affiche les 7 derniers points de l'historique réel en base
+        setData(historyWeights.slice(-7));
+      } catch (e) {
+        console.error("Erreur graphique poids:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchWeight();
+  }, [refreshTrigger, userData]);
+
+  if (loading) return <ActivityIndicator color="#FF6600" style={{ marginVertical: 20 }} />;
+
+  if (data.length < 2) return (
+    <View style={styles.emptyWeightCard}>
+      <Text style={styles.emptyWeightText}>Ajoute une pesée pour voir ton évolution par rapport au départ !</Text>
+    </View>
+  );
+
+  const chartData = {
+    labels: data.map(d => d.date === "Départ" ? "Dép." : d.date?.split('/')[0] + '/' + d.date?.split('/')[1]),
+    datasets: [{
+      data: data.map(d => Number(d.weight)),
+      color: (opacity = 1) => `rgba(255, 102, 0, ${opacity})`,
+      strokeWidth: 3
+    }]
+  };
+
+  return (
+    <LineChart
+      data={chartData}
+      width={screenWidth - 40}
+      height={180}
+      chartConfig={{
+        backgroundColor: "#1A1A1A",
+        backgroundGradientFrom: "#1A1A1A",
+        backgroundGradientTo: "#1A1A1A",
+        decimalPlaces: 1,
+        color: (opacity = 1) => `rgba(255, 102, 0, ${opacity})`,
+        labelColor: (opacity = 1) => `rgba(150, 150, 150, ${opacity})`,
+        propsForDots: { r: "5", strokeWidth: "2", stroke: "#FF6600" }
+      }}
+      bezier
+      style={{ borderRadius: 15, marginVertical: 10 }}
+    />
+  );
+};
+
+// --- Composant Historique Exercice ---
 const ExerciseHistory = ({ name }: { name: string }) => {
   const [historyEntries, setHistoryEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,27 +120,29 @@ const ExerciseHistory = ({ name }: { name: string }) => {
       const user = auth.currentUser;
       if (!user) return;
       try {
-        const q = query(collection(db, "users", user.uid, "history"), where("exerciseName", "==", name));
+        const q = query(
+          collection(db, "users", user.uid, "history"),
+          where("exerciseName", "==", name),
+          orderBy("timestamp", "asc")
+        );
         const querySnapshot = await getDocs(q);
         let data = querySnapshot.docs.map(doc => doc.data());
-        data.sort((a, b) => {
-          const parseDate = (d: string) => {
-            const p = d.split('/');
-            return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0])).getTime();
-          };
-          return parseDate(a.date) - parseDate(b.date);
-        });
         setHistoryEntries(data.slice(-6));
-      } catch (e) { console.error(e); } finally { setLoading(false); }
+      } catch (e) { console.error("Erreur historique:", e); } finally { setLoading(false); }
     };
     fetchHistory();
   }, [name]);
 
   if (loading) return <ActivityIndicator size="small" color="#FF6600" style={{ margin: 10 }} />;
+
   const hasData = historyEntries.length >= 2;
   const chartData = {
     labels: historyEntries.map(item => item.date?.split('/')[0] + '/' + item.date?.split('/')[1] || ""),
-    datasets: [{ data: historyEntries.map(item => Number(item.weight) || 0), color: (opacity = 1) => `rgba(255, 102, 0, ${opacity})`, strokeWidth: 3 }]
+    datasets: [{
+        data: historyEntries.map(item => Number(item.weight) || 0),
+        color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+        strokeWidth: 3
+    }]
   };
 
   return (
@@ -81,19 +151,35 @@ const ExerciseHistory = ({ name }: { name: string }) => {
         <>
           <Text style={styles.historyTitle}>PROGRESSION (KG)</Text>
           <LineChart
-            data={chartData} width={screenWidth - 60} height={160}
-            chartConfig={{ backgroundColor: "#161616", backgroundGradientFrom: "#161616", backgroundGradientTo: "#161616", decimalPlaces: 0, color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`, labelColor: (opacity = 1) => `rgba(150, 150, 150, ${opacity})`, propsForDots: { r: "4", strokeWidth: "2", stroke: "#FF6600" } }}
-            bezier style={{ marginVertical: 10, borderRadius: 10, marginLeft: -15 }}
+            data={chartData}
+            width={screenWidth - 60}
+            height={160}
+            chartConfig={{
+                backgroundColor: "#161616",
+                backgroundGradientFrom: "#161616",
+                backgroundGradientTo: "#161616",
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(150, 150, 150, ${opacity})`,
+                propsForDots: { r: "4", strokeWidth: "2", stroke: "#FF6600" }
+            }}
+            bezier
+            style={{ marginVertical: 10, borderRadius: 10, marginLeft: -15 }}
           />
         </>
       )}
       <Text style={styles.historyTitle}>DERNIÈRES PERFORMANCES</Text>
       {[...historyEntries].reverse().map((item, index) => (
         <View key={index} style={styles.historyRow}>
-          <View style={styles.timelineContainer}><View style={styles.timelineDot} />{index !== historyEntries.length - 1 && <View style={styles.timelineLine} />}</View>
+          <View style={styles.timelineContainer}>
+              <View style={styles.timelineDot} />
+              {index !== historyEntries.length - 1 && <View style={styles.timelineLine} />}
+          </View>
           <View style={styles.historyInfo}>
             <Text style={styles.historyDate}>{item.date}</Text>
-            <View style={styles.historyStats}><Text style={styles.historyWeight}>{item.weight}kg {item.sets} x {item.reps} reps</Text></View>
+            <View style={styles.historyStats}>
+                <Text style={styles.historyWeight}>{item.weight}kg {item.sets} x {item.reps} reps</Text>
+            </View>
           </View>
         </View>
       ))}
@@ -110,7 +196,10 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(null);
 
-  // États Modales
+  const [weightModalVisible, setWeightModalVisible] = useState(false);
+  const [newWeight, setNewWeight] = useState("");
+  const [weightRefresh, setWeightRefresh] = useState(0);
+
   const [logModalVisible, setLogModalVisible] = useState(false);
   const [selectedExData, setSelectedExData] = useState<any>(null);
   const [weight, setWeight] = useState("");
@@ -119,47 +208,79 @@ export default function ProfileScreen() {
   const [customDate, setCustomDate] = useState("");
   const [weeklySchedule, setWeeklySchedule] = useState<any>({"Lun": [], "Mar": [], "Mer": [], "Jeu": [], "Ven": [], "Sam": [], "Dim": []});
 
-  // --- Logique de récupération des données ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          // 1. Récupérer les infos de l'utilisateur (Poids, Nom, etc.)
           const userSnap = await getDoc(doc(db, "users", user.uid));
-
           if (userSnap.exists()) {
             setUserData(userSnap.data());
           } else {
-            // Si l'utilisateur est connecté mais n'a pas de data, on l'envoie au setup
             router.replace("/auth/setup-profile");
             return;
           }
 
-          // 2. Récupérer le planning
           const planSnap = await getDoc(doc(db, "users", user.uid, "config", "planning"));
           if (planSnap.exists()) {
             setWeeklySchedule(planSnap.data().schedule);
           }
-
-          // Analytics
-          if (analytics) {
-            logEvent(analytics, 'screen_view', { screen_name: 'Profile', user_id: user.uid });
-          }
         } catch (error) {
-          console.error("Erreur chargement données profil:", error);
-          Alert.alert("Erreur", "Impossible de charger votre profil.");
+          console.error("Erreur chargement profil:", error);
         } finally {
           setLoading(false);
         }
       } else {
-        // Redirection vers login si déconnecté
         router.replace("/auth/login");
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // --- Fonctions utilitaires ---
+  const handleAddWeight = async () => {
+    if (!newWeight) return;
+    const user = auth.currentUser;
+    if (!user || !userData) return;
+
+    try {
+      const now = new Date();
+      const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      const weightNum = parseFloat(newWeight.replace(',', '.'));
+      const historyRef = collection(db, "users", user.uid, "weightHistory");
+
+      // Vérifier si c'est la toute première pesée pour sauvegarder le poids de départ
+      const q = query(historyRef, limit(1));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        await addDoc(historyRef, {
+          weight: parseFloat(userData.weight),
+          timestamp: userData.createdAt || serverTimestamp(),
+          date: "Départ"
+        });
+      }
+
+      // 1. Ajouter la nouvelle pesée à l'historique
+      await addDoc(historyRef, {
+        weight: weightNum,
+        timestamp: serverTimestamp(),
+        date: dateStr
+      });
+
+      // 2. Mettre à jour le document utilisateur (pour le header)
+      await setDoc(doc(db, "users", user.uid), { weight: newWeight }, { merge: true });
+
+      // 3. Mise à jour locale
+      setUserData((prev: any) => ({ ...prev, weight: newWeight }));
+      setWeightRefresh(prev => prev + 1);
+
+      setWeightModalVisible(false);
+      setNewWeight("");
+      Alert.alert("Succès", "Poids mis à jour !");
+    } catch (e) {
+      Alert.alert("Erreur", "Impossible d'enregistrer le poids.");
+    }
+  };
+
   const getTodayFull = () => {
     const dayIndex = new Date().getDay();
     const mapIndexToFull = [6, 0, 1, 2, 3, 4, 5];
@@ -184,13 +305,12 @@ export default function ProfileScreen() {
 
   const addExerciseToDay = () => {
     if (!tempSelectedExercise || tempSelectedExercise === "Choisir un exercice...") {
-        return Alert.alert("Infos", "Veuillez choisir un exercice dans la liste");
+        return Alert.alert("Infos", "Veuillez choisir un exercice");
     }
     const newSchedule = { ...weeklySchedule };
     if (!newSchedule[selectedDay]) newSchedule[selectedDay] = [];
-
     if (newSchedule[selectedDay].find((e: any) => e.exerciseName === tempSelectedExercise)) {
-      return Alert.alert("Infos", "Déjà dans ton planning pour ce jour");
+      return Alert.alert("Infos", "Déjà présent");
     }
     newSchedule[selectedDay] = [...newSchedule[selectedDay], { id: Date.now().toString(), exerciseName: tempSelectedExercise }];
     setWeeklySchedule(newSchedule);
@@ -223,20 +343,34 @@ export default function ProfileScreen() {
   };
 
   const confirmAddWithLog = async () => {
-    if (!weight || !reps || !sets || !customDate) return Alert.alert("Erreur", "Remplis tout");
+    if (!weight || !reps || !sets || !customDate) {
+        return Alert.alert("Erreur", "Merci de remplir tous les champs.");
+    }
     const user = auth.currentUser;
     if (!user) return;
+
     try {
       const parts = customDate.split('/');
       const dateObject = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]), 12, 0, 0);
-      await addDoc(collection(db, "users", user.uid, "history"), {
-        exerciseName: selectedExData.name, weight: Number(weight), reps: Number(reps), sets: Number(sets), date: customDate, timestamp: Timestamp.fromDate(dateObject)
+      const historyCollection = collection(db, "users", user.uid, "history");
+
+      await addDoc(historyCollection, {
+        exerciseName: selectedExData.name,
+        weight: parseFloat(weight.replace(',', '.')),
+        reps: parseInt(reps),
+        sets: parseInt(sets),
+        date: customDate,
+        timestamp: Timestamp.fromDate(dateObject),
+        createdAt: serverTimestamp()
       });
 
       setLogModalVisible(false);
       setWeight(""); setReps(""); setSets("");
       Alert.alert("Succès", "Données enregistrées !");
-    } catch (e) { Alert.alert("Erreur", "Erreur Firebase"); }
+    } catch (e: any) {
+      console.error("Erreur Firebase:", e);
+      Alert.alert("Erreur", "Impossible d'enregistrer.");
+    }
   };
 
   const toggleExpand = (id: string) => {
@@ -263,44 +397,58 @@ export default function ProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: "#121212" }}>
       <ScrollView ref={scrollRef} style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* HEADER */}
         <View style={styles.header}>
             <View style={styles.headerContent}>
                 <View style={styles.userInfoRow}>
                     <View style={styles.avatar}>
                         <Text style={styles.avatarText}>
-                            {userData?.firstName ? userData.firstName.charAt(0).toUpperCase() : userData?.lastName?.charAt(0).toUpperCase() || "U"}
+                            {userData?.firstName ? userData.firstName.charAt(0).toUpperCase() : "U"}
                         </Text>
                     </View>
                     <View style={styles.infoContainer}>
-                        <Text style={styles.userName}>
-                            {userData?.firstName} {userData?.lastName}
-                        </Text>
-                        <Text style={styles.userStats}>
-                            {userData?.weight}kg • {userData?.height}cm • {userData?.age} ans
-                        </Text>
+                        <Text style={styles.userName}>{userData?.firstName} {userData?.lastName}</Text>
+                        <Text style={styles.userStats}>{userData?.weight}kg • {userData?.height}cm • {userData?.age} ans</Text>
                     </View>
                 </View>
                 <View style={{flexDirection: 'row'}}>
-                  <TouchableOpacity onPress={() => setPlanningModalVisible(true)} style={[styles.blackLogoutBtn, {marginRight: 10, backgroundColor: '#FF6600'}]}><Text style={[styles.blackLogoutBtnText, {color: '#000'}]}>PLANNING</Text></TouchableOpacity>
-                  <TouchableOpacity onPress={() => signOut(auth)} style={styles.blackLogoutBtn}><Text style={styles.blackLogoutBtnText}>SORTIR</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={() => setPlanningModalVisible(true)} style={[styles.blackLogoutBtn, {marginRight: 10, backgroundColor: '#FF6600'}]}>
+                      <Text style={[styles.blackLogoutBtnText, {color: '#000'}]}>PLANNING</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => signOut(auth)} style={styles.blackLogoutBtn}>
+                      <Text style={styles.blackLogoutBtnText}>SORTIR</Text>
+                  </TouchableOpacity>
                 </View>
             </View>
         </View>
 
-        {/* ... (Le reste de ton UI avec TodaySection et Body reste identique) ... */}
+        {/* SECTION POIDS */}
+        <View style={styles.weightSection}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <Text style={styles.sectionLabel}>ÉVOLUTION DU POIDS</Text>
+            <TouchableOpacity style={styles.addWeightBtn} onPress={() => setWeightModalVisible(true)}>
+              <Text style={styles.addWeightBtnText}>+ PESÉE</Text>
+            </TouchableOpacity>
+          </View>
+          <WeightHistory userData={userData} refreshTrigger={weightRefresh} />
+        </View>
+
+        {/* AUJOURD'HUI */}
         <View style={styles.todaySection}>
           <Text style={styles.sectionLabel}>AUJOURD'HUI • {todayName.toUpperCase()}</Text>
           {weeklySchedule[todayName]?.length > 0 ? (
             <View style={styles.todayCard}>
               {weeklySchedule[todayName].map((ex: any) => (
                 <TouchableOpacity key={ex.id} style={styles.todayExItem} onPress={() => goToExercise(ex.exerciseName)}>
-                  <View style={styles.dot} /><Text style={styles.todayExName}>{ex.exerciseName}</Text><Text style={{color: '#444', fontSize: 10, marginLeft: 'auto'}}>HISTORIQUE ➔</Text>
+                  <View style={styles.dot} /><Text style={styles.todayExName}>{ex.exerciseName}</Text>
+                  <Text style={{color: '#444', fontSize: 10, marginLeft: 'auto'}}>HISTORIQUE ➔</Text>
                 </TouchableOpacity>
               ))}
             </View>
           ) : <View style={styles.restCard}><Text style={styles.restText}>REPOS 😴</Text></View>}
         </View>
 
+        {/* EXERCICES */}
         <View style={styles.body}>
           {workoutData.map((section: any, idx: number) => (
             <View key={idx} style={styles.sectionWrapper}>
@@ -320,12 +468,35 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
+      {/* MODALE PESÉE */}
+      <Modal visible={weightModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={styles.logBox}>
+            <Text style={styles.logTitle}>NOUVELLE PESÉE</Text>
+            <TextInput
+              style={[styles.input, {width: '60%', marginBottom: 20}]}
+              placeholder="Poids (kg)"
+              placeholderTextColor="#444"
+              keyboardType="numeric"
+              value={newWeight}
+              onChangeText={setNewWeight}
+              autoFocus
+            />
+            <TouchableOpacity style={styles.confirmBtn} onPress={handleAddWeight}>
+                <Text style={styles.confirmBtnText}>ENREGISTRER</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setWeightModalVisible(false)}>
+                <Text style={{color: '#666', marginTop: 15}}>ANNULER</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Modal Planning */}
       <Modal visible={planningModalVisible} transparent animationType="slide">
         <View style={styles.overlay}>
           <View style={[styles.logBox, { height: '85%', width: '95%', paddingHorizontal: 15 }]}>
             <Text style={styles.logTitle}>ORGANISER MA SEMAINE</Text>
-
             <View style={styles.calendarStrip}>
               {DAYS_FULL.map(day => (
                 <TouchableOpacity key={day} onPress={() => setSelectedDay(day)} style={[styles.dayCircle, selectedDay === day && styles.dayCircleActive]}>
@@ -339,9 +510,7 @@ export default function ProfileScreen() {
               <View style={styles.pickerRow}>
                 <View style={{flex: 1}}>
                     <TouchableOpacity style={styles.dropdownHeader} onPress={togglePicker}>
-                        <Text style={[styles.dropdownHeaderText, tempSelectedExercise !== "Choisir un exercice..." && {color: '#FFF'}]}>
-                            {tempSelectedExercise}
-                        </Text>
+                        <Text style={[styles.dropdownHeaderText, tempSelectedExercise !== "Choisir un exercice..." && {color: '#FFF'}]}>{tempSelectedExercise}</Text>
                         <Text style={{color: '#FF6600', fontSize: 12, fontWeight: 'bold'}}>{isPickerOpen ? "▲" : "▼"}</Text>
                     </TouchableOpacity>
                     {isPickerOpen && (
@@ -376,13 +545,11 @@ export default function ProfileScreen() {
                     <View key={ex.id} style={styles.plannedRow}>
                         <Text style={styles.plannedText}>{ex.exerciseName}</Text>
                         <TouchableOpacity onPress={() => removeExerciseFromDay(ex.id)} style={styles.deleteBtn}>
-                        <Text style={{color: '#FF4444', fontSize: 10, fontWeight: 'bold'}}>SUPPR.</Text>
+                            <Text style={{color: '#FF4444', fontSize: 10, fontWeight: 'bold'}}>SUPPR.</Text>
                         </TouchableOpacity>
                     </View>
                     ))
-                ) : (
-                    <View style={styles.emptyContainer}><Text style={styles.emptyText}>Aucun exercice prévu</Text></View>
-                )}
+                ) : <View style={styles.emptyContainer}><Text style={styles.emptyText}>Aucun exercice prévu</Text></View>}
                 </ScrollView>
             </View>
 
@@ -393,19 +560,40 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* Modal Enregistrement Log */}
+      {/* Modal Enregistrement Log Exercice */}
       <Modal visible={logModalVisible} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.logBox}>
             <Text style={styles.logTitle}>ENREGISTRER</Text>
-            <View style={styles.dateInputWrapper}><TextInput style={styles.dateInput} value={customDate} onChangeText={setCustomDate} placeholder="JJ/MM/AAAA" placeholderTextColor="#444" /></View>
-            <View style={styles.inputGroup}>
-              <View style={styles.inputField}><Text style={styles.inputLabel}>KG</Text><TextInput style={styles.input} keyboardType="numeric" value={weight} onChangeText={setWeight} /></View>
-              <View style={styles.inputField}><Text style={styles.inputLabel}>SÉRIES</Text><TextInput style={styles.input} keyboardType="numeric" value={sets} onChangeText={setSets} /></View>
-              <View style={styles.inputField}><Text style={styles.inputLabel}>REPS</Text><TextInput style={styles.input} keyboardType="numeric" value={reps} onChangeText={setReps} /></View>
+            <View style={styles.dateInputWrapper}>
+                <TextInput
+                    style={styles.dateInput}
+                    value={customDate}
+                    onChangeText={setCustomDate}
+                    placeholder="JJ/MM/AAAA"
+                    placeholderTextColor="#444"
+                />
             </View>
-            <TouchableOpacity style={styles.confirmBtn} onPress={confirmAddWithLog}><Text style={styles.confirmBtnText}>VALIDER</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => setLogModalVisible(false)}><Text style={{color: '#666', marginTop: 15}}>ANNULER</Text></TouchableOpacity>
+            <View style={styles.inputGroup}>
+              <View style={styles.inputField}>
+                  <Text style={styles.inputLabel}>KG</Text>
+                  <TextInput style={styles.input} keyboardType="numeric" value={weight} onChangeText={setWeight} />
+              </View>
+              <View style={styles.inputField}>
+                  <Text style={styles.inputLabel}>SÉRIES</Text>
+                  <TextInput style={styles.input} keyboardType="numeric" value={sets} onChangeText={setSets} />
+              </View>
+              <View style={styles.inputField}>
+                  <Text style={styles.inputLabel}>REPS</Text>
+                  <TextInput style={styles.input} keyboardType="numeric" value={reps} onChangeText={setReps} />
+              </View>
+            </View>
+            <TouchableOpacity style={styles.confirmBtn} onPress={confirmAddWithLog}>
+                <Text style={styles.confirmBtnText}>VALIDER</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setLogModalVisible(false)}>
+                <Text style={{color: '#666', marginTop: 15}}>ANNULER</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -414,7 +602,6 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  // Garde tes styles ils sont parfaits
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' },
   header: { backgroundColor: "#1A1A1A", paddingHorizontal: 20, paddingBottom: 25, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#333' },
@@ -427,6 +614,13 @@ const styles = StyleSheet.create({
   userStats: { color: '#666', fontSize: 12 },
   blackLogoutBtn: { backgroundColor: '#333', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   blackLogoutBtnText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+
+  weightSection: { paddingHorizontal: 20, marginTop: 20 },
+  addWeightBtn: { backgroundColor: 'rgba(255, 102, 0, 0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5, borderWidth: 1, borderColor: '#FF6600' },
+  addWeightBtnText: { color: '#FF6600', fontSize: 10, fontWeight: 'bold' },
+  emptyWeightCard: { backgroundColor: '#1e1e1e', padding: 20, borderRadius: 15, alignItems: 'center', marginTop: 10 },
+  emptyWeightText: { color: '#666', fontSize: 12, textAlign: 'center' },
+
   todaySection: { paddingHorizontal: 20, marginBottom: 20, marginTop: 20 },
   sectionLabel: { color: '#666', fontSize: 11, fontWeight: 'bold', marginBottom: 10, letterSpacing: 1 },
   todayCard: { backgroundColor: '#1E1E1E', borderRadius: 15, padding: 10 },
